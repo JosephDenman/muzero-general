@@ -4,8 +4,9 @@ import seaborn
 import torch
 
 import models
-from self_play import MCTS, Node, SelfPlay
-
+from self_play import SelfPlay
+from mcts import MCTS
+from node import Node
 
 class DiagnoseModel:
     """
