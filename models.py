@@ -1,8 +1,6 @@
 import math
-from abc import ABC, abstractmethod
-
 import torch
-
+from abstract_network import AbstractNetwork
 
 class MuZeroNetwork:
     def __new__(cls, config):
@@ -40,43 +38,8 @@ class MuZeroNetwork:
                 'The network parameter should be "fullyconnected" or "resnet".'
             )
 
-
-def dict_to_cpu(dictionary):
-    cpu_dict = {}
-    for key, value in dictionary.items():
-        if isinstance(value, torch.Tensor):
-            cpu_dict[key] = value.cpu()
-        elif isinstance(value, dict):
-            cpu_dict[key] = dict_to_cpu(value)
-        else:
-            cpu_dict[key] = value
-    return cpu_dict
-
-
-class AbstractNetwork(ABC, torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        pass
-
-    @abstractmethod
-    def initial_inference(self, observation):
-        pass
-
-    @abstractmethod
-    def recurrent_inference(self, encoded_state, action):
-        pass
-
-    def get_weights(self):
-        return dict_to_cpu(self.state_dict())
-
-    def set_weights(self, weights):
-        self.load_state_dict(weights)
-
-
 ##################################
 ######## Fully Connected #########
-
-
 class MuZeroFullyConnectedNetwork(AbstractNetwork):
     def __init__(
         self,
@@ -117,7 +80,6 @@ class MuZeroFullyConnectedNetwork(AbstractNetwork):
         self.dynamics_reward_network = torch.nn.DataParallel(
             mlp(encoding_size, fc_reward_layers, self.full_support_size)
         )
-
         self.prediction_policy_network = torch.nn.DataParallel(
             mlp(encoding_size, fc_policy_layers, self.action_space_size)
         )
@@ -169,7 +131,7 @@ class MuZeroFullyConnectedNetwork(AbstractNetwork):
 
         return next_encoded_state_normalized, reward
 
-    def initial_inference(self, observation):
+    def initial_inference(self, observation, legal_actions):
         encoded_state = self.representation(observation)
         policy_logits, value = self.prediction(encoded_state)
         # reward equal to 0 for consistency
@@ -598,7 +560,7 @@ class MuZeroResidualNetwork(AbstractNetwork):
         ) / scale_next_encoded_state
         return next_encoded_state_normalized, reward
 
-    def initial_inference(self, observation):
+    def initial_inference(self, observation, legal_actions):
         encoded_state = self.representation(observation)
         policy_logits, value = self.prediction(encoded_state)
         # reward equal to 0 for consistency

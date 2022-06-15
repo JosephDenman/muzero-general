@@ -38,7 +38,7 @@ class DiagnoseModel:
         """
         trajectory_info = Trajectoryinfo("Virtual trajectory", self.config)
         root, mcts_info = MCTS(self.config).run(
-            self.model, observation, self.config.action_space, to_play, True
+            self.model, observation, None, to_play, True
         )
         trajectory_info.store_info(root, mcts_info, None, numpy.NaN)
 
@@ -53,7 +53,15 @@ class DiagnoseModel:
                 virtual_to_play = self.config.players[0]
 
             # Generate new root
-            value, reward, policy_logits, hidden_state = self.model.recurrent_inference(
+            (
+                value,
+                reward,
+                sampled_actions,
+                policy_logits,
+                empirical_logits,
+                reference_logits,
+                hidden_state
+            ) = self.model.recurrent_inference(
                 root.hidden_state,
                 torch.tensor([[action]]).to(root.hidden_state.device),
             )
@@ -61,15 +69,17 @@ class DiagnoseModel:
             reward = models.support_to_scalar(reward, self.config.support_size).item()
             root = Node(0)
             root.expand(
-                self.config.action_space,
+                sampled_actions,
                 virtual_to_play,
                 reward,
                 policy_logits,
+                empirical_logits,
+                reference_logits,
                 hidden_state,
             )
 
             root, mcts_info = MCTS(self.config).run(
-                self.model, None, self.config.action_space, virtual_to_play, True, root
+                self.model, None, None, virtual_to_play, True, root
             )
             trajectory_info.store_info(
                 root, mcts_info, action, reward, new_prior_root_value=value
@@ -199,18 +209,30 @@ class Trajectoryinfo:
     """
 
     def __init__(self, title, config):
+
         self.title = title + ": "
         self.config = config
         self.action_history = []
         self.reward_history = []
+
+        self.prior_policies_labels = []
         self.prior_policies = []
+
+        self.policies_after_planning_labels = []
         self.policies_after_planning = []
+
         # Not implemented, need to store them in every nodes of the mcts
         self.prior_values = []
-        self.values_after_planning = [[numpy.NaN] * len(self.config.action_space)]
+
+        self.values_after_planning_labels = [numpy.NaN]
+        self.values_after_planning = [[numpy.NaN] * self.config.sample_size]
+
         self.prior_root_value = []
         self.root_value_after_planning = []
-        self.prior_rewards = [[numpy.NaN] * len(self.config.action_space)]
+
+        self.prior_rewards_labels = [numpy.NaN]
+        self.prior_rewards = [[numpy.NaN] * self.config.sample_size]
+
         self.mcts_depth = []
 
     def store_info(self, root, mcts_info, action, reward, new_prior_root_value=None):
@@ -218,44 +240,47 @@ class Trajectoryinfo:
             self.action_history.append(action)
         if reward is not None:
             self.reward_history.append(reward)
-        self.prior_policies.append(
-            [
-                root.children[action].prior
-                if action in root.children.keys()
-                else numpy.NaN
-                for action in self.config.action_space
-            ]
-        )
-        self.policies_after_planning.append(
-            [
-                root.children[action].visit_count / self.config.num_simulations
-                if action in root.children.keys()
-                else numpy.NaN
-                for action in self.config.action_space
-            ]
-        )
-        self.values_after_planning.append(
-            [
-                root.children[action].value()
-                if action in root.children.keys()
-                else numpy.NaN
-                for action in self.config.action_space
-            ]
-        )
+
+        labels = []
+        priors = []
+        for action in root.children.keys():
+            labels.append(action)
+            priors.append(root.children[action].prior)
+        self.prior_policies_labels.append(labels)
+        self.prior_policies.append(priors)
+
+        labels = []
+        average_visit_counts = []
+        for action in root.children.keys():
+            labels.append(action)
+            average_visit_counts.append(root.children[action].visit_count / self.config.num_simulations)
+        self.policies_after_planning_labels.append(labels)
+        self.policies_after_planning.append(average_visit_counts)
+
+        labels = []
+        values = []
+        for action in root.children.keys():
+            labels.append(action)
+            values.append(root.children[action].value())
+        self.values_after_planning_labels.append(labels)
+        self.values_after_planning.append(values)
+
         self.prior_root_value.append(
             mcts_info["root_predicted_value"]
             if not new_prior_root_value
             else new_prior_root_value
         )
+
         self.root_value_after_planning.append(root.value())
-        self.prior_rewards.append(
-            [
-                root.children[action].reward
-                if action in root.children.keys()
-                else numpy.NaN
-                for action in self.config.action_space
-            ]
-        )
+
+        labels = []
+        rewards = []
+        for action in root.children.keys():
+            labels.append(action)
+            rewards.append(root.children[action].reward)
+        self.prior_rewards_labels.append(labels)
+        self.prior_rewards.append(rewards)
+
         self.mcts_depth.append(mcts_info["max_tree_depth"])
 
     def plot_trajectory(self):
@@ -264,8 +289,7 @@ class Trajectoryinfo:
         plt.figure(self.title + name)
         ax = seaborn.heatmap(
             self.prior_policies,
-            mask=numpy.isnan(self.prior_policies),
-            annot=True,
+            annot=self.prior_policies_labels
         )
         ax.set(xlabel="Action", ylabel="Timestep")
         ax.set_title(name)
@@ -275,8 +299,7 @@ class Trajectoryinfo:
         plt.figure(self.title + name)
         ax = seaborn.heatmap(
             self.policies_after_planning,
-            mask=numpy.isnan(self.policies_after_planning),
-            annot=True,
+            annot=self.policies_after_planning_labels
         )
         ax.set(xlabel="Action", ylabel="Timestep")
         ax.set_title(name)
@@ -288,7 +311,6 @@ class Trajectoryinfo:
             # ax = seaborn.lineplot(x=list(range(len(self.action_history))), y=self.action_history)
             ax = seaborn.heatmap(
                 numpy.transpose([self.action_history]),
-                mask=numpy.isnan(numpy.transpose([self.action_history])),
                 xticklabels=False,
                 annot=True,
             )
@@ -300,8 +322,7 @@ class Trajectoryinfo:
         plt.figure(self.title + name)
         ax = seaborn.heatmap(
             self.values_after_planning,
-            mask=numpy.isnan(self.values_after_planning),
-            annot=True,
+            annot=self.values_after_planning_labels
         )
         ax.set(xlabel="Action", ylabel="Timestep")
         ax.set_title(name)
@@ -336,7 +357,8 @@ class Trajectoryinfo:
         print(name, self.prior_rewards, "\n")
         plt.figure(self.title + name)
         ax = seaborn.heatmap(
-            self.prior_rewards, mask=numpy.isnan(self.prior_rewards), annot=True
+            self.prior_rewards,
+            annot=self.prior_rewards_labels
         )
         ax.set(xlabel="Action", ylabel="Timestep")
         ax.set_title(name)

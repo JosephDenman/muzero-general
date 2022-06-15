@@ -137,9 +137,9 @@ class SelfPlay:
                     numpy.array(observation).shape == self.config.observation_shape
                 ), f"Observation should match the observation_shape defined in MuZeroConfig. Expected {self.config.observation_shape} but got {numpy.array(observation).shape}."
                 stacked_observations = game_history.get_stacked_observations(
-                    -1, self.config.stacked_observations, len(self.config.action_space)
+                    -1, self.config.stacked_observations
                 )
-
+                # print("stacked_observations = ", stacked_observations)
                 # Choose the action
                 if opponent == "self" or muzero_player == self.game.to_play():
                     root, mcts_info = MCTS(self.config).run(
@@ -173,7 +173,7 @@ class SelfPlay:
                     print(f"Played action: {self.game.action_to_string(action)}")
                     self.game.render()
 
-                game_history.store_search_statistics(root, self.config.action_space)
+                game_history.store_search_statistics(root)
 
                 # Next batch
                 game_history.action_history.append(action)
@@ -213,7 +213,6 @@ class SelfPlay:
             assert set(self.game.legal_actions()).issubset(
                 set(self.config.action_space)
             ), "Legal actions should be a subset of the action space."
-
             return numpy.random.choice(self.game.legal_actions()), None
         else:
             raise NotImplementedError(

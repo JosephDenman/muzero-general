@@ -17,25 +17,19 @@ class GameHistory:
         self.priorities = None
         self.game_priority = None
 
-    def store_search_statistics(self, root, action_space):
+    def store_search_statistics(self, root):
         # Turn visit count from root into a policy
         if root is not None:
             sum_visits = sum(child.visit_count for child in root.children.values())
             self.child_visits.append(
-                [
-                    root.children[a].visit_count / sum_visits
-                    if a in root.children
-                    else 0
-                    for a in action_space
-                ]
+                [root.children[a].visit_count / sum_visits for a in root.children.keys()]
             )
-
             self.root_values.append(root.value())
         else:
             self.root_values.append(None)
 
     def get_stacked_observations(
-        self, index, num_stacked_observations, action_space_size
+        self, index, num_stacked_observations
     ):
         """
         Generate a new observation with the observation at the index position
@@ -55,7 +49,6 @@ class GameHistory:
                         [
                             numpy.ones_like(stacked_observations[0])
                             * self.action_history[past_observation_index + 1]
-                            / action_space_size
                         ],
                     )
                 )

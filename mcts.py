@@ -48,24 +48,23 @@ class MCTS:
             (
                 root_predicted_value,
                 reward,
+                sampled_actions,
                 policy_logits,
+                empirical_logits,
+                reference_logits,
                 hidden_state,
-            ) = model.initial_inference(observation)
+            ) = model.initial_inference(observation, legal_actions)
             root_predicted_value = models.support_to_scalar(
                 root_predicted_value, self.config.support_size
             ).item()
             reward = models.support_to_scalar(reward, self.config.support_size).item()
-            assert (
-                legal_actions
-            ), f"Legal actions should not be an empty array. Got {legal_actions}."
-            assert set(legal_actions).issubset(
-                set(self.config.action_space)
-            ), "Legal actions should be a subset of the action space."
             root.expand(
-                legal_actions,
+                sampled_actions,
                 to_play,
                 reward,
                 policy_logits,
+                empirical_logits,
+                reference_logits,
                 hidden_state,
             )
 
@@ -98,17 +97,27 @@ class MCTS:
             # Inside the search tree we use the dynamics function to obtain the next hidden
             # state given an action and the previous hidden state
             parent = search_path[-2]
-            value, reward, policy_logits, hidden_state = model.recurrent_inference(
+            (
+                value,
+                reward,
+                sampled_actions,
+                policy_logits,
+                empirical_logits,
+                reference_logits,
+                hidden_state
+            )= model.recurrent_inference(
                 parent.hidden_state,
                 torch.tensor([[action]]).to(parent.hidden_state.device),
             )
             value = models.support_to_scalar(value, self.config.support_size).item()
             reward = models.support_to_scalar(reward, self.config.support_size).item()
             node.expand(
-                self.config.action_space,
+                sampled_actions,
                 virtual_to_play,
                 reward,
                 policy_logits,
+                empirical_logits,
+                reference_logits,
                 hidden_state,
             )
 

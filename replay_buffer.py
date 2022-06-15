@@ -68,6 +68,9 @@ class ReplayBuffer:
         return self.buffer
 
     def get_batch(self):
+        """
+        :returns: policy_batch, an array of an array of policies, one array of policies at each node for each game
+        """
         (
             index_batch,
             observation_batch,
@@ -92,8 +95,7 @@ class ReplayBuffer:
             observation_batch.append(
                 game_history.get_stacked_observations(
                     game_pos,
-                    self.config.stacked_observations,
-                    len(self.config.action_space),
+                    self.config.stacked_observations
                 )
             )
             action_batch.append(actions)
@@ -121,7 +123,7 @@ class ReplayBuffer:
         # action_batch: batch, num_unroll_steps+1
         # value_batch: batch, num_unroll_steps+1
         # reward_batch: batch, num_unroll_steps+1
-        # policy_batch: batch, num_unroll_steps+1, len(action_space)
+        # policy_batch: batch, num_unroll_steps+1, len(sample_size)
         # weight_batch: batch
         # gradient_scale_batch: batch, num_unroll_steps+1
         return (
@@ -264,6 +266,7 @@ class ReplayBuffer:
     def make_target(self, game_history, state_index):
         """
         Generate targets for every unroll steps.
+        :returns: target_policies, an array of improved policies for the actions sampled at each root
         """
         target_values, target_rewards, target_policies, actions = [], [], [], []
         for current_index in range(
@@ -298,7 +301,7 @@ class ReplayBuffer:
                         for _ in range(len(game_history.child_visits[0]))
                     ]
                 )
-                actions.append(numpy.random.choice(self.config.action_space))
+                actions.append(numpy.random.choice(self.model.sample(self.config.sample_size)))
 
         return target_values, target_rewards, target_policies, actions
 
@@ -346,8 +349,7 @@ class Reanalyse:
                     [
                         game_history.get_stacked_observations(
                             i,
-                            self.config.stacked_observations,
-                            len(self.config.action_space),
+                            self.config.stacked_observations
                         )
                         for i in range(len(game_history.root_values))
                     ]
@@ -359,7 +361,7 @@ class Reanalyse:
                     .to(next(self.model.parameters()).device)
                 )
                 values = models.support_to_scalar(
-                    self.model.initial_inference(observations)[0],
+                    self.model.initial_inference(observations, None)[0],
                     self.config.support_size,
                 )
                 game_history.reanalysed_predicted_root_values = (

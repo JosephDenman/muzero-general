@@ -1,5 +1,16 @@
 import numpy
-import torch
+
+
+def normalize(logits):
+    """
+    :param logits: A dictionary mapping actions to logits
+    :return:       A dictionary representing a normalized probability distribution
+    """
+    normalization_constant = 1.0 / sum(logits.values())
+    for action, logit in logits.items():
+        logits[action] = logit * normalization_constant
+    return logits
+
 
 class Node:
     def __init__(self, prior):
@@ -19,19 +30,19 @@ class Node:
             return 0
         return self.value_sum / self.visit_count
 
-    def expand(self, actions, to_play, reward, policy_logits, hidden_state):
+    def expand(self, sampled_actions, to_play, reward, policy_logits, empirical_logits, reference_logits, hidden_state):
         """
         We expand a node using the value, reward and policy prediction obtained from the
         neural network.
+        :param sampled_actions:  A list of actions sampled from the reference distribution
+        :param policy_logits:    A dictionary mapping actions to policy logits
+        :param empirical_logits: A dictionary mapping actions to empirical logits
+        :param reference_logits: A dictionary mapping actions to reference logits
         """
         self.to_play = to_play
         self.reward = reward
         self.hidden_state = hidden_state
-
-        policy_values = torch.softmax(
-            torch.tensor([policy_logits[0][a] for a in actions]), dim=0
-        ).tolist()
-        policy = {a: policy_values[i] for i, a in enumerate(actions)}
+        policy = normalize({a: empirical_logits[a] / reference_logits[a] * policy_logits[a] for a in sampled_actions})
         for action, p in policy.items():
             self.children[action] = Node(p)
 

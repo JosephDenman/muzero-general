@@ -77,7 +77,7 @@ class Trainer:
                 value_loss,
                 reward_loss,
                 policy_loss,
-            ) = self.update_weights(batch)
+            ) = self.update_weights(batch) # batch = sequences of values and policies along the game trajectory
 
             if self.config.PER:
                 # Save new priorities in the replay buffer (See https://arxiv.org/abs/1803.00933)
@@ -129,15 +129,15 @@ class Trainer:
         (
             observation_batch,
             action_batch,
-            target_value,
-            target_reward,
-            target_policy,
+            target_value_batch,
+            target_reward_batch,
+            target_policy_batch,
             weight_batch,
             gradient_scale_batch,
         ) = batch
 
         # Keep values as scalars for calculating the priorities for the prioritized replay
-        target_value_scalar = numpy.array(target_value, dtype="float32")
+        target_value_scalar = numpy.array(target_value_batch, dtype="float32")
         priorities = numpy.zeros_like(target_value_scalar)
 
         device = next(self.model.parameters()).device
@@ -147,33 +147,29 @@ class Trainer:
             torch.tensor(numpy.array(observation_batch)).float().to(device)
         )
         action_batch = torch.tensor(action_batch).long().to(device).unsqueeze(-1)
-        target_value = torch.tensor(target_value).float().to(device)
-        target_reward = torch.tensor(target_reward).float().to(device)
-        target_policy = torch.tensor(target_policy).float().to(device)
+        target_value_batch = torch.tensor(target_value_batch).float().to(device)
+        target_reward_batch = torch.tensor(target_reward_batch).float().to(device)
+        target_policy_batch = torch.tensor(target_policy_batch).float().to(device)
         gradient_scale_batch = torch.tensor(gradient_scale_batch).float().to(device)
         # observation_batch: batch, channels, height, width
         # action_batch: batch, num_unroll_steps+1, 1 (unsqueeze)
-        # target_value: batch, num_unroll_steps+1
-        # target_reward: batch, num_unroll_steps+1
-        # target_policy: batch, num_unroll_steps+1, len(action_space)
+        # target_value_batch: batch, num_unroll_steps+1
+        # target_reward_batch: batch, num_unroll_steps+1
+        # target_policy_batch: batch, num_unroll_steps+1, len(sample_size)
         # gradient_scale_batch: batch, num_unroll_steps+1
 
-        target_value = models.scalar_to_support(target_value, self.config.support_size)
-        target_reward = models.scalar_to_support(
-            target_reward, self.config.support_size
-        )
-        # target_value: batch, num_unroll_steps+1, 2*support_size+1
-        # target_reward: batch, num_unroll_steps+1, 2*support_size+1
+        target_value_batch = models.scalar_to_support(target_value_batch, self.config.support_size)
+        target_reward_batch = models.scalar_to_support(target_reward_batch, self.config.support_size)
+        # target_value_batch: batch, num_unroll_steps+1, 2*support_size+1
+        # target_reward_batch: batch, num_unroll_steps+1, 2*support_size+1
 
         ## Generate predictions
-        value, reward, policy_logits, hidden_state = self.model.initial_inference(
-            observation_batch
-        )
+        (_, value, reward, _, _, _, hidden_state) = self.model.initial_inference(observation_batch, None)
+        policy_logits = self.model.policy_logits(target_policy_batch[0].keys())
         predictions = [(value, reward, policy_logits)]
         for i in range(1, action_batch.shape[1]):
-            value, reward, policy_logits, hidden_state = self.model.recurrent_inference(
-                hidden_state, action_batch[:, i]
-            )
+            (_, value, reward, _, _, _, hidden_state) = self.model.recurrent_inference(hidden_state, action_batch[:, i])
+            policy_logits = self.model.policy_logits(target_policy_batch[i].keys())
             # Scale the gradient at the start of the dynamics function (See paper appendix Training)
             hidden_state.register_hook(lambda grad: grad * 0.5)
             predictions.append((value, reward, policy_logits))
@@ -187,9 +183,9 @@ class Trainer:
             value.squeeze(-1),
             reward.squeeze(-1),
             policy_logits,
-            target_value[:, 0],
-            target_reward[:, 0],
-            target_policy[:, 0],
+            target_value_batch[0],
+            target_reward_batch[0],
+            target_policy_batch[0],
         )
         value_loss += current_value_loss
         policy_loss += current_policy_loss
@@ -216,9 +212,9 @@ class Trainer:
                 value.squeeze(-1),
                 reward.squeeze(-1),
                 policy_logits,
-                target_value[:, i],
-                target_reward[:, i],
-                target_policy[:, i],
+                target_value_batch[:, i],
+                target_reward_batch[:, i],
+                target_policy_batch[:, i],
             )
 
             # Scale gradient by the number of unroll steps (See paper appendix Training)
@@ -291,7 +287,13 @@ class Trainer:
         target_reward,
         target_policy,
     ):
+        """
+        :param policy_logits: the policy produced by the current policy network
+        :param target_policy: the improved policy produced by I^hat_βπ
+        """
         # Cross-entropy seems to have a better convergence than MSE
+        # TODO: Use KL divergence for policy loss
+        # TODO: Make this work with maps instead of arrays
         value_loss = (-target_value * torch.nn.LogSoftmax(dim=1)(value)).sum(1)
         reward_loss = (-target_reward * torch.nn.LogSoftmax(dim=1)(reward)).sum(1)
         policy_loss = (-target_policy * torch.nn.LogSoftmax(dim=1)(policy_logits)).sum(
