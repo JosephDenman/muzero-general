@@ -301,7 +301,7 @@ class ReplayBuffer:
                         for _ in range(len(game_history.child_visits[0]))
                     ]
                 )
-                actions.append(numpy.random.choice(self.model.sample(self.config.sample_size)))
+                actions.append(numpy.random.choice(self.model.sample_actions(self.config.sample_size)))
 
         return target_values, target_rewards, target_policies, actions
 

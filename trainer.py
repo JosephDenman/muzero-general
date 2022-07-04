@@ -293,10 +293,10 @@ class Trainer:
         """
         # Cross-entropy seems to have a better convergence than MSE
         # TODO: Use KL divergence for policy loss
-        # TODO: Make this work with maps instead of arrays
+        #       Make this work with maps instead of arrays
         value_loss = (-target_value * torch.nn.LogSoftmax(dim=1)(value)).sum(1)
         reward_loss = (-target_reward * torch.nn.LogSoftmax(dim=1)(reward)).sum(1)
-        policy_loss = (-target_policy * torch.nn.LogSoftmax(dim=1)(policy_logits)).sum(
+        policy_loss = (-target_policy * torch.nn.Softmax(dim=1)(policy_logits)).sum(
             1
         )
         return value_loss, reward_loss, policy_loss
